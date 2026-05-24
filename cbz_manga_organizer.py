@@ -29,21 +29,32 @@ class GroupedCBZCombiner:
         self.cover_preview_img = None
         self.cover_cache = {}
 
-        self._last_loaded_group = None
-
         # ---------- PREVIEW ----------
-        preview_frame = tk.Frame(root, bg="#1e1e1e")
+        # ---------- PREVIEW ----------
+        preview_frame = tk.Frame(root, bg="#1e1e1e", width=220, height=320)
         preview_frame.pack(pady=10)
 
-        tk.Label(preview_frame, text="Cover Preview",
-                 fg="white", bg="#1e1e1e",
-                 font=("Segoe UI", 12, "bold")).pack()
+        # Prevent auto-resize
+        preview_frame.pack_propagate(False)
 
-        self.cover_label = tk.Label(preview_frame,
-                                   text="No Cover Loaded",
-                                   fg="#aaaaaa",
-                                   bg="#1e1e1e")
-        self.cover_label.pack()
+        tk.Label(
+            preview_frame,
+            text="Cover Preview",
+            fg="white",
+            bg="#1e1e1e",
+            font=("Segoe UI", 12, "bold")
+        ).pack()
+
+        self.cover_label = tk.Label(
+            preview_frame,
+            text="No Cover Loaded",
+            fg="#aaaaaa",
+            bg="#1e1e1e",
+            width=200,
+            height=300
+        )
+
+        self.cover_label.pack(expand=True)
 
         # ---------- MAIN ----------
         main = tk.Frame(root, bg="#1e1e1e")
@@ -101,78 +112,85 @@ class GroupedCBZCombiner:
 
     def setup_styles(self):
         self.style.configure("TButton", background="#3a3a3a", foreground="white")
-        self.style.configure("TLabel", background="#1e1e1e", foreground="white")
-        self.style.configure("TEntry", fieldbackground="#2a2a2a", foreground="white")
+
+    # ---------- AUTO COVER ----------
+    def generate_cover_from_cbz(self, group):
+        files = self.groups.get(group)
+        if not files:
+            return False
+
+        try:
+            with zipfile.ZipFile(files[0], 'r') as z:
+                imgs = sorted([f for f in z.namelist()
+                               if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))])
+                if not imgs:
+                    return
+
+                with z.open(imgs[0]) as img_file:
+                    img = Image.open(img_file).convert("RGB")
+                    path = Path(f"auto_cover_{group.replace(' ', '_')}.jpg")
+                    img.save(path, "JPEG", quality=95)
+                    self.group_covers[group] = str(path)
+                    return True
+        except Exception as e:
+            print("Auto cover failed:", e)
 
     # ---------- COVER PREVIEW ----------
     def update_cover_preview(self, group):
-        cover_path = self.group_covers.get(group)
+        path = self.group_covers.get(group)
 
-        if not cover_path or not os.path.exists(cover_path):
+        if not path or not os.path.exists(path):
             self.cover_label.config(image="", text="No Cover Loaded")
-            self.cover_preview_img = None
             return
 
-        try:
-            img = Image.open(cover_path)
-            img.thumbnail((200, 300))
+        img = Image.open(path)
+        img.thumbnail((200, 300))
 
-            self.cover_preview_img = ImageTk.PhotoImage(img)
-            self.cover_label.config(image=self.cover_preview_img, text="")
-        except:
-            self.cover_label.config(image="", text="Failed to load cover")
-            self.cover_preview_img = None
+        self.cover_preview_img = ImageTk.PhotoImage(img)
+
+        self.cover_label.config(
+            image=self.cover_preview_img,
+            text="",
+            width=200,
+            height=300
+        )
     # ---------- MOVE ----------
     def move_up(self):
-        group = self.get_selected_group()
+        g = self.get_selected_group()
         sel = self.file_listbox.curselection()
-
-        if not group or not sel:
+        if not g or not sel:
             return
-
         i = sel[0]
         if i == 0:
             return
-
-        items = self.groups[group]
-
-        item = items.pop(i)
-        items.insert(i - 1, item)
-
-        self.load_group_files(force=True)
+        items = self.groups[g]
+        items.insert(i - 1, items.pop(i))
+        self.load_group_files()
         self.file_listbox.select_set(i - 1)
 
     def move_down(self):
-        group = self.get_selected_group()
+        g = self.get_selected_group()
         sel = self.file_listbox.curselection()
-
-        if not group or not sel:
+        if not g or not sel:
             return
-
         i = sel[0]
-        items = self.groups[group]
-
+        items = self.groups[g]
         if i >= len(items) - 1:
             return
-
-        item = items.pop(i)
-        items.insert(i + 1, item)
-
-        self.load_group_files(force=True)
+        items.insert(i + 1, items.pop(i))
+        self.load_group_files()
         self.file_listbox.select_set(i + 1)
 
     # ---------- SORT ----------
     def sort_group(self, group):
-        def extract_number(path):
-            nums = re.findall(r'\d+', os.path.basename(path))
-            return int(nums[0]) if nums else float('inf')
-        self.groups[group].sort(key=extract_number)
+        self.groups[group].sort(
+            key=lambda p: int(re.findall(r'\d+', os.path.basename(p))[0]) if re.findall(r'\d+', os.path.basename(p)) else float('inf')
+        )
 
-    # ---------- FILE HANDLING ----------
+    # ---------- FILE ----------
     def parse_volume(self, filename):
-        name = os.path.basename(filename)
-        vol = re.search(r'(?:Vol|Volume)[\.\s]*(\d+)', name, re.I)
-        return int(vol.group(1)) if vol else None
+        m = re.search(r'(?:Vol|Volume)[\.\s]*(\d+)', filename, re.I)
+        return int(m.group(1)) if m else None
 
     def drop_files(self, event):
         files = self.root.tk.splitlist(event.data)
@@ -200,35 +218,41 @@ class GroupedCBZCombiner:
             self.sort_group(g)
 
         self.refresh_group_list()
-        self.load_group_files(force=True)
+        self.load_group_files()
 
     def add_files(self):
         for f in filedialog.askopenfilenames():
             self.drop_files(type("event", (), {"data": f}))
 
     def remove_file(self):
-        print(self.file_listbox.curselection())
         g = self.get_selected_group()
-        print(g)
         if not g:
             return
         for i in reversed(self.file_listbox.curselection()):
-            print(self.groups[g][i])
             del self.groups[g][i]
-        self.load_group_files(force=True)
+        self.load_group_files()
 
-    def load_group_files(self, event=None, force=False):
+    def load_group_files(self, event=None):
         sel = self.group_listbox.curselection()
+        print(sel)
         if not sel:
             return
-
         group = self.group_listbox.get(sel[0])
+        print(group)
+
 
         self.file_listbox.delete(0, tk.END)
-        for f in self.groups.get(group, []):
+        for f in self.groups[group]:
             self.file_listbox.insert(tk.END, os.path.basename(f))
 
-        self.update_cover_preview(group)
+        if not self.group_covers.get(group):
+            cover_exists = self.generate_cover_from_cbz(group)
+
+            if cover_exists:
+                self.update_cover_preview(group)
+        else:
+            self.update_cover_preview(group)
+
 
     def get_selected_group(self):
         sel = self.group_listbox.curselection()
@@ -236,7 +260,7 @@ class GroupedCBZCombiner:
 
     def refresh_group_list(self):
         self.group_listbox.delete(0, tk.END)
-        for g in sorted(self.groups.keys()):
+        for g in sorted(self.groups):
             self.group_listbox.insert(tk.END, g)
 
     def add_group(self):
@@ -260,80 +284,62 @@ class GroupedCBZCombiner:
             self.group_covers[g] = file
             self.update_cover_preview(g)
 
-    # ---------- COVER FETCH ----------
-    def fetch_cover_options(self, title):
-        headers = {"User-Agent": "Mozilla/5.0"}
-
-        if title in self.cover_cache:
-            return self.cover_cache[title]
-
-        images = []
-        try:
-            url = f"https://api.mangadex.org/manga?title={urllib.parse.quote(title)}&limit=5"
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as res:
-                data = json.loads(res.read())
-
-            for manga in data.get("data", [])[:2]:
-                manga_id = manga["id"]
-                cover_url = f"https://api.mangadex.org/cover?manga[]={manga_id}&limit=20"
-                req = urllib.request.Request(cover_url, headers=headers)
-
-                with urllib.request.urlopen(req, timeout=10) as res:
-                    cover_data = json.loads(res.read())
-
-                for cover in cover_data.get("data", []):
-                    file_name = cover["attributes"]["fileName"]
-                    img_url = f"https://uploads.mangadex.org/covers/{manga_id}/{file_name}"
-                    try:
-                        with urllib.request.urlopen(img_url, timeout=10) as img:
-                            images.append(Image.open(img).convert("RGB"))
-                    except:
-                        continue
-        except:
-            pass
-
-        self.cover_cache[title] = images
-        return images
-
+    # ---------- FETCH (FIXED) ----------
     def fetch_all_covers(self):
         title = self.title_entry.get()
+        group = self.get_selected_group()
+
         if not title:
             messagebox.showwarning("Missing Title", "Enter a title first")
             return
 
-        group = self.get_selected_group()
         if not group:
             messagebox.showwarning("No Group Selected", "Select a group first")
             return
 
         images = self.fetch_cover_options(title)
-
         if not images:
             messagebox.showwarning("No Covers Found", "Could not find covers")
             return
 
-        # Only pick once
         chosen = self.choose_cover_popup(images, group)
-
         if chosen:
             path = Path(f"cover_{group.replace(' ', '_')}.jpg")
             chosen.save(path)
             self.group_covers[group] = str(path)
             self.update_cover_preview(group)
 
+    # ---------- COVER FETCH ----------
+    def fetch_cover_options(self, title):
+        images = []
+        try:
+            url = f"https://api.mangadex.org/manga?title={urllib.parse.quote(title)}"
+            data = json.loads(urllib.request.urlopen(url).read())
+            for manga in data["data"][:2]:
+                mid = manga["id"]
+                cover_url = f"https://api.mangadex.org/cover?manga[]={mid}"
+                covers = json.loads(urllib.request.urlopen(cover_url).read())
+                for c in covers["data"]:
+                    img_url = f"https://uploads.mangadex.org/covers/{mid}/{c['attributes']['fileName']}"
+                    try:
+                        images.append(Image.open(urllib.request.urlopen(img_url)))
+                    except:
+                        pass
+        except:
+            pass
+        return images
+
     def choose_cover_popup(self, images, group):
         win = tk.Toplevel(self.root)
         frame = tk.Frame(win)
         frame.pack()
-
         selected = {"img": None}
-        tk_imgs = []
 
         def pick(img):
             selected["img"] = img
             win.destroy()
 
+        tk_imgs = []
         for i, img in enumerate(images):
             thumb = img.copy()
             thumb.thumbnail((120, 180))
@@ -341,37 +347,12 @@ class GroupedCBZCombiner:
             tk_imgs.append(tk_img)
 
             lbl = tk.Label(frame, image=tk_img)
-            lbl.grid(row=i // 4, column=i % 4)
+            lbl.grid(row=i//4, column=i%4)
             lbl.bind("<Button-1>", lambda e, im=img: pick(im))
 
         win.tk_imgs = tk_imgs
         self.root.wait_window(win)
         return selected["img"]
-
-    # ---------- STITCHING ----------
-    def process_images_with_stitching(self, image_paths, temp_dir, counter):
-        last_image = None
-
-        for img_path in image_paths:
-            with Image.open(img_path) as im:
-                im = im.convert("RGB")
-                width, height = im.size
-
-                if height < 300 and last_image is not None:
-                    prev_w, prev_h = last_image.size
-                    new_img = Image.new("RGB", (prev_w, prev_h + height))
-                    new_img.paste(last_image, (0, 0))
-                    new_img.paste(im, (0, prev_h))
-                    last_image = new_img
-                    continue
-
-                if last_image is not None:
-                    last_image.save(os.path.join(temp_dir, f"{counter:05d}.jpg"), "JPEG", quality=95)
-                    counter += 1
-
-                last_image = im
-
-        return last_image, counter
 
     # ---------- EXPORT ----------
     def export_cbz(self):
@@ -409,18 +390,13 @@ class GroupedCBZCombiner:
                         if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
                     ])
 
-                    last_image, counter = self.process_images_with_stitching(
-                        images, temp_dir, counter
-                    )
+                    last_image, counter = self.process_images_with_stitching(images, temp_dir, counter)
 
                 if last_image is not None:
                     last_image.save(os.path.join(temp_dir, f"{counter:05d}.jpg"), "JPEG", quality=95)
 
-                title = self.title_entry.get() or "Manga"
-                author = self.author_entry.get()
-                output_name = f"{title} - {author} - {group}.cbz" if author else f"{title} - {group}.cbz"
-
-                with zipfile.ZipFile(os.path.join(output_dir, output_name), 'w', zipfile.ZIP_DEFLATED) as out:
+                output_path = os.path.join(output_dir, f"{group}.cbz")
+                with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as out:
                     for img in sorted(Path(temp_dir).glob("*.jpg")):
                         out.write(img, img.name)
 
@@ -428,6 +404,30 @@ class GroupedCBZCombiner:
                 shutil.rmtree(temp_dir)
 
         messagebox.showinfo("Done", "CBZ export complete!")
+
+    def process_images_with_stitching(self, image_paths, temp_dir, counter):
+        last_image = None
+
+        for img_path in image_paths:
+            with Image.open(img_path) as im:
+                im = im.convert("RGB")
+                width, height = im.size
+
+                if height < 300 and last_image is not None:
+                    prev_w, prev_h = last_image.size
+                    new_img = Image.new("RGB", (prev_w, prev_h + height))
+                    new_img.paste(last_image, (0, 0))
+                    new_img.paste(im, (0, prev_h))
+                    last_image = new_img
+                    continue
+
+                if last_image is not None:
+                    last_image.save(os.path.join(temp_dir, f"{counter:05d}.jpg"), "JPEG", quality=95)
+                    counter += 1
+
+                last_image = im
+
+        return last_image, counter
 
 
 if __name__ == "__main__":
