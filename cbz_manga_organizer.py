@@ -1,3 +1,14 @@
+
+"""
+Author: Areeba R
+Date: 5-23-26
+Organizers CBZ chapters into volume and assigns cover page
+
+In order to get this to work please run pip install below: 
+pip install pillow tkinterdnd2
+"""
+
+
 import os
 import re
 import zipfile
