@@ -2,7 +2,9 @@
 """
 Author: Areeba R
 Date: 5-23-26
-Organizers CBZ chapters into volume and assigns cover page
+Organizes CBZ chapters into volume and assigns cover page
+Input - chapters and assigned volumes (using groups)
+Output - combined volumes in cbz format 
 
 In order to get this to work please run pip install below: 
 pip install pillow tkinterdnd2
